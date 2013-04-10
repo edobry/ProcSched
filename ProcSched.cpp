@@ -68,13 +68,31 @@ public:
 	void Tick(){
 		CPUelapsed++;
 	}
+	
+	void TickCTSS(){
+		CPUelapsed++;
+		quantRemaining--;
+	}
+
+
+	bool QuantEnded() {
+		return quantRemaining == 0;
+	}
+
+	bool HalfQuantRemaining() {
+		return 2*quantRemaining >= quantTotal;
+	}
 
 	Process(int id, int aT, int tC, int aB)
-		: ID(id), arrivalTime(aT), totalCPU(tC), avgBurst(aB), CPUelapsed(0) {}
+		: ID(id), arrivalTime(aT), totalCPU(tC), avgBurst(aB), CPUelapsed(0), quantTotal(1), quantRemaining(1), CTSSIndex(0) {}
 
 private: 	
 	int CPUelapsed;
+
+	// CTSS-related variables
 	int quantRemaining;
+	int quantTotal;
+	int CTSSIndex;
 
 	int evenDistribution(int elap, int total){
 		return getProbability() <= (CPUelapsed == (avgBurst - 1)) 
@@ -82,7 +100,6 @@ private:
 			: 1/2;
 	}
 };
-
 struct WaitingProcess{
 	Process* process;
 	int timeReady;
@@ -217,7 +234,7 @@ protected:
 			}
 	}
 	void checkWaiting(){
-		while(queueWait.back().timeReady == time){
+		while(!queueWait.empty() && queueWait.back().timeReady == time){
 			scheduleProcess(queueWait.back().process);
 			queueWait.pop();
 		}
@@ -233,22 +250,27 @@ public:
 		getIncoming();
 		checkWaiting();
 
+
 		//Run process
 		switch(state){
 		case Idle:
+			cout << "Processes ready: " << queueReady.size() << endl;
 			runNextReadyProcess();
 			break;
 		case ContextSwitch:
-			if(--delayLeft == 0) state = Idle;
+			cout << "Context switch delay... " << delayLeft-- << " ticks" << endl;
+			if(delayLeft == 0) state = Idle;
 			break;	
 		case Running:
-			current->Tick();
+			cout << "Running proccess #" << current->ID << endl;
 			if(current->BurstFinished()){
+				cout << "Burst finished, process waiting" << endl;
 				queueWait.push(WaitingProcess(current, time+SchedulerOptions.IOdelay));
 
 				state = ContextSwitch;
 				delayLeft = SchedulerOptions.ContextSwitchDelay;
 			}
+			else current->Tick();
 			break;
 		}
 		return;
@@ -262,20 +284,48 @@ public:
 
 	void scheduleProcess(Process* p){ queueReady.push(p); }
 
-	FCFSScheduler(ProcessQueue& processes) : Scheduler(processes) {}
+	FCFSScheduler(ProcessQueue& processes) : Scheduler(processes), delayLeft(0) {}
 protected:
 	void runNextReadyProcess(){
 		current = queueReady.back();
 		queueReady.pop();
 		state = Running;
+		current->Tick();
 	}
 private:
 	int delayLeft;
 	queue<Process*> queueReady;
 };
 
-//class CTSScheduler : public Scheduler{
-//};
+class CTSScheduler : public Scheduler{
+private:
+	vector<queue<Process*>> queues;
+	list<Process *>::iterator it;
+public:
+	void Tick(){
+		cout << "====================================================" << endl
+			<< "Tick " << time << endl << "-----------------------" << endl;
+		vector<Process*> incoming = processes.AtTime(time);
+		processes.RemoveTime(time++);
+		cout << "Processes incoming: " << incoming.size() << endl;
+		if(incoming.size() > 0)
+			for(int i = 0; i < incoming.size(); i++){
+				Process* current = incoming.back();
+				cout << "Queued process #" << current->ID << endl;
+				queues.at(0).push(current);
+			}
+		// Look at the highest priority process
+		return;
+	}
+
+	bool IsDone(){
+		cout << "Processes yet to arive: " << processes.Count() << endl
+			<< "Processes waiting: " << queueWait.size() << endl;
+		return processes.Count() == 0;// && queueWait.size() == 0;
+	}
+
+	CTSScheduler(ProcessQueue& processes, int CTSSQueues) : Scheduler(processes), queues(vector<queue<Process*>>()) {}
+};
 
 int main(int argc, char* argv[])
 {

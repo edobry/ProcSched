@@ -11,7 +11,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{9DD08192-9F58-4836-ACDF-5ACAA6A0A74E}</ProjectGuid>
+    <ProjectGuid>{D69B6C21-FF1C-4884-83A9-2D64B7C1C0BD}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
     <RootNamespace>ProcSched</RootNamespace>
   </PropertyGroup>
