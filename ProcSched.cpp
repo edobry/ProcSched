@@ -16,6 +16,29 @@ struct Process {
 		: ID(id), arrivalTime(aT), totalCPU(tC), avgBurst(aB) {}
 };
 
+class Random{
+public:
+	int operator()() {
+		if(rands[0] < 0){
+			ifstream randoms("random-numbers.txt");	
+			if (randoms.is_open())
+			{
+				string line;
+				getline(randoms, line);
+				for(int i = 0; i < 10000; i++)
+					rands[i] = stoi(line);
+				randoms.close();
+			}
+		}
+		if(next > 10000) next = 0;
+		return rands[next++];
+	}
+	Random() : next(0) {}
+private:
+	int rands[100000];
+	int next;
+};
+
 void readOpts(string& ProcessFile, int& IOdelay, int& ContextSwitchDelay, int& CTSSQueues, bool& Debug){
 	ifstream scheduling("scheduling.txt");
 
@@ -80,8 +103,6 @@ int main(int argc, char* argv[])
 
 	readOpts(ProcessFile, IOdelay, ContextSwitchDelay, CTSSQueues, Debug);
 	readProcesses(ProcessFile, processes);
-
-
 
 	return 0;
 }
