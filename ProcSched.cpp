@@ -10,6 +10,21 @@
 using namespace std;
 
 //Utilities
+struct Options{
+	string ProcessFile;
+	int IOdelay, ContextSwitchDelay, CTSSQueues;
+	bool Debug;
+
+	Options() {}
+	Options(string pF, int io, int cSD, int ctssQ, bool d) : ProcessFile(pF), IOdelay(io),
+		ContextSwitchDelay(cSD), CTSSQueues(ctssQ), Debug(d) {}
+};
+Options SchedulerOptions;
+
+enum ProcessorState {
+	Idle, Running, ContextSwitch
+};
+
 class Random{
 public:
 	int operator()() {
@@ -42,18 +57,16 @@ public:
 	int totalCPU;
 	int avgBurst;
 
-	//Commands
-	int Start();
-	int Pause();
-	int Resume();
-	int Stop();
-
 	//Queries
 	bool BurstFinished(){
 		if(CPUelapsed == totalCPU) return true;
 		else if(CPUelapsed < (avgBurst - 1))
 			return false;
 		else return evenDistribution(CPUelapsed, totalCPU);
+	}
+	
+	void Tick(){
+		CPUelapsed++;
 	}
 
 	Process(int id, int aT, int tC, int aB)
@@ -68,17 +81,21 @@ private:
 			? 1/3
 			: 1/2;
 	}
+};
 
-	int tick();
+struct WaitingProcess{
+	Process* process;
+	int timeReady;
+
+	WaitingProcess(Process* p, int tR) : process(p), timeReady(tR) {}
 };
 
 class ProcessQueue{
 private:
 	unordered_map<int, vector<Process*>> inner;
+	int count;
 public:
-	ProcessQueue(){
-		inner = unordered_map<int, vector<Process*>>();
-	}
+	ProcessQueue() : count(0), inner(unordered_map<int, vector<Process*>>()) {}
 
 	void Enqueue(Process* process){
 		int time = process->arrivalTime;
@@ -86,24 +103,26 @@ public:
 			inner[time] = vector<Process*>();
 
 		inner[time].push_back(process);
+		count++;
 	}
 
 	vector<Process*> AtTime(int time){
-		return inner.count(time) ? inner[time] : vector<Process*>();
+		return inner.count(time) > 0 ? inner.at(time) : vector<Process*>();
 	}
 
 	void RemoveTime(int time){
+		count -= inner[time].size(); 
 		inner.erase(time);
 	}
 
-	int count(){
-		return inner.size();
+	int Count(){
+		return count;
 	}
 };
 
-
 //Initialization
-void readOpts(string& ProcessFile, int& IOdelay, int& ContextSwitchDelay, int& CTSSQueues, bool& Debug){
+void readOpts(){
+	SchedulerOptions = Options();
 	ifstream scheduling("scheduling.txt");
 
 	if (scheduling.is_open())
@@ -117,19 +136,19 @@ void readOpts(string& ProcessFile, int& IOdelay, int& ContextSwitchDelay, int& C
 			string val = line.substr(splitPos+1);
 			switch(i){
 			case 0:
-				ProcessFile = val;
+				SchedulerOptions.ProcessFile = val;
 				break;
 			case 1:
-				IOdelay = stoi(val);
+				SchedulerOptions.IOdelay = stoi(val);
 				break;
 			case 2:
-				ContextSwitchDelay = stoi(val);
+				SchedulerOptions.ContextSwitchDelay = stoi(val);
 				break;
 			case 3:
-				CTSSQueues = stoi(val);
+				SchedulerOptions.CTSSQueues = stoi(val);
 				break;
 			case 4:
-				Debug = val == "true";
+				SchedulerOptions.Debug = val == "true";
 				break;
 			default: break;
 			}
@@ -140,8 +159,8 @@ void readOpts(string& ProcessFile, int& IOdelay, int& ContextSwitchDelay, int& C
 	}
 }
 
-void readProcesses(string ProcessFile, ProcessQueue& processes){
-	ifstream processFile(ProcessFile);
+void readProcesses(ProcessQueue& processes){
+	ifstream processFile(SchedulerOptions.ProcessFile);
 
 	if (processFile.is_open())
 	{
@@ -156,69 +175,120 @@ void readProcesses(string ProcessFile, ProcessQueue& processes){
 		}
 		processFile.close();
 
-		cout << "Processes queued: " << processes.count() << endl;
+		cout << "Processes queued: " << processes.Count() << endl;
 	}
 }
 
 //Scheduling Algorithms
 class Scheduler{
 public:
-	virtual int tick(){ return 0; }
+	virtual void tick(){ }
+	virtual bool IsDone(){ return false; }
+	virtual void scheduleProcess(Process* p){}
+	
+	void Schedule(){
+		do{
+			tick();
+		} while(!IsDone());
+	}
 
-	Scheduler(ProcessQueue& processes) : time(0), processes(processes), queueWait(queue<Process*>()) {}
+	Scheduler(ProcessQueue& processes) : time(0), processes(processes), queueWait(queue<WaitingProcess>()), state(Idle) {}
 protected:
 	int time;
+	Process* current;
 	ProcessQueue processes;
-	queue<Process*> queueWait;
+	queue<WaitingProcess> queueWait;
+	ProcessorState state;
+
+	virtual void runNextReadyProcess() {}
+
+	void getIncoming(){
+		vector<Process*> incoming = processes.AtTime(time);
+		int numIncoming = incoming.size();
+		processes.RemoveTime(time++);
+		cout << "Processes incoming: " << numIncoming << endl;
+
+		if(numIncoming > 0)
+			for(int i = 0; i < numIncoming; i++){
+				Process* current = incoming.back();
+				cout << "Queueing process #" << current->ID << endl;
+				scheduleProcess(current);
+				incoming.pop_back();
+			}
+	}
+	void checkWaiting(){
+		while(queueWait.back().timeReady == time){
+			scheduleProcess(queueWait.back().process);
+			queueWait.pop();
+		}
+	}
 };
 
 class FCFSScheduler : public Scheduler{
 public:
-	int tick(){
+	void tick(){
 		cout << "====================================================" << endl
 			<< "Tick " << time << endl << "-----------------------" << endl;
-		vector<Process*> incoming = processes.AtTime(time);
-		processes.RemoveTime(time++);
-		cout << "Processes incoming: " << incoming.size() << endl;
-		if(incoming.size() > 0)
-			for(int i = 0; i < incoming.size(); i++){
-				Process* current = incoming.back();
-				cout << "Queued process #" << current->ID << endl;
-				queueWait.push(current);
-				incoming.pop_back();
+
+		getIncoming();
+		checkWaiting();
+
+		//Run process
+		switch(state){
+		case Idle:
+			runNextReadyProcess();
+			break;
+		case ContextSwitch:
+			if(--delayLeft == 0) state = Idle;
+			break;	
+		case Running:
+			current->Tick();
+			if(current->BurstFinished()){
+				queueWait.push(WaitingProcess(current, time+SchedulerOptions.IOdelay));
+
+				state = ContextSwitch;
+				delayLeft = SchedulerOptions.ContextSwitchDelay;
 			}
-			return 0;
+			break;
+		}
+		return;
+	}
+	
+	bool IsDone(){
+		cout << "Processes yet to arive: " << processes.Count() << endl
+			<< "Processes waiting: " << queueWait.size() << endl;
+		return processes.Count() == 0;// && queueWait.size() == 0;
 	}
 
-	bool IsDone(){
-		cout << "Processes yet to arive: " << processes.count() << endl
-			<< "Processes waiting: " << queueWait.size() << endl;
-		return processes.count() == 0;// && queueWait.size() == 0;
-	}
+	void scheduleProcess(Process* p){ queueReady.push(p); }
 
 	FCFSScheduler(ProcessQueue& processes) : Scheduler(processes) {}
+protected:
+	void runNextReadyProcess(){
+		current = queueReady.back();
+		queueReady.pop();
+		state = Running;
+	}
+private:
+	int delayLeft;
+	queue<Process*> queueReady;
 };
 
-class CTSScheduler : public Scheduler{
-};
+//class CTSScheduler : public Scheduler{
+//};
 
 int main(int argc, char* argv[])
 {
 	//Initialization
-	string ProcessFile;
-	int IOdelay, ContextSwitchDelay, CTSSQueues;
-	bool Debug;
 	ProcessQueue processes = ProcessQueue();
 
-	readOpts(ProcessFile, IOdelay, ContextSwitchDelay, CTSSQueues, Debug);
-	readProcesses(ProcessFile, processes);
+	readOpts();
+	readProcesses(processes);
 
 	//Scheduling
 	cout << "Starting Scheduling: FCFS" << endl;
 	FCFSScheduler scheduler(processes);
-	do{
-		scheduler.tick();
-	} while(!scheduler.IsDone());
+	scheduler.Schedule();
 
 	return 0;
 }
