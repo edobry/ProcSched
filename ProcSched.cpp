@@ -92,6 +92,10 @@ public:
 		return inner.count(time) ? inner[time] : vector<Process*>();
 	}
 
+	void RemoveTime(int time){
+		inner.erase(time);
+	}
+
 	int count(){
 		return inner.size();
 	}
@@ -130,8 +134,8 @@ void readOpts(string& ProcessFile, int& IOdelay, int& ContextSwitchDelay, int& C
 			default: break;
 			}
 			cout << optName << ": " << val << endl;
-
 		}
+		cout << "==============================================================" << endl << endl;
 		scheduling.close();
 	}
 }
@@ -151,15 +155,17 @@ void readProcesses(string ProcessFile, ProcessQueue& processes){
 			processes.Enqueue(new Process(id, aT, tC, aB));
 		}
 		processFile.close();
+
+		cout << "Processes queued: " << processes.count() << endl;
 	}
 }
 
 //Scheduling Algorithms
 class Scheduler{
 public:
-	virtual int tick();
+	virtual int tick(){ return 0; }
 
-	Scheduler(ProcessQueue& processes) : processes(processes), queueWait(queue<Process*>()) {}
+	Scheduler(ProcessQueue& processes) : time(0), processes(processes), queueWait(queue<Process*>()) {}
 protected:
 	int time;
 	ProcessQueue processes;
@@ -169,14 +175,28 @@ protected:
 class FCFSScheduler : public Scheduler{
 public:
 	int tick(){
-		vector<Process*> incoming = processes.AtTime(time++);
+		cout << "====================================================" << endl
+			<< "Tick " << time << endl << "-----------------------" << endl;
+		vector<Process*> incoming = processes.AtTime(time);
+		processes.RemoveTime(time++);
+		cout << "Processes incoming: " << incoming.size() << endl;
 		if(incoming.size() > 0)
 			for(int i = 0; i < incoming.size(); i++){
-				queueWait.push(incoming.back());
+				Process* current = incoming.back();
+				cout << "Queued process #" << current->ID << endl;
+				queueWait.push(current);
 				incoming.pop_back();
 			}
 			return 0;
 	}
+
+	bool IsDone(){
+		cout << "Processes yet to arive: " << processes.count() << endl
+			<< "Processes waiting: " << queueWait.size() << endl;
+		return processes.count() == 0;// && queueWait.size() == 0;
+	}
+
+	FCFSScheduler(ProcessQueue& processes) : Scheduler(processes) {}
 };
 
 class CTSScheduler : public Scheduler{
@@ -194,7 +214,11 @@ int main(int argc, char* argv[])
 	readProcesses(ProcessFile, processes);
 
 	//Scheduling
-	//scheduleFCFS(processes);
+	cout << "Starting Scheduling: FCFS" << endl;
+	FCFSScheduler scheduler(processes);
+	do{
+		scheduler.tick();
+	} while(!scheduler.IsDone());
 
 	return 0;
 }
