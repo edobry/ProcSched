@@ -3,19 +3,13 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <limits.h>
+#include <unordered_map>
+#include <queue>
 
 using namespace std;
 
-struct Process {
-	int ID;
-	int arrivalTime;
-	int totalCPU;
-	int avgBurst;
-
-	Process(int id, int aT, int tC, int aB)
-		: ID(id), arrivalTime(aT), totalCPU(tC), avgBurst(aB) {}
-};
-
+//Utilities
 class Random{
 public:
 	int operator()() {
@@ -38,7 +32,73 @@ private:
 	int rands[100000];
 	int next;
 };
+Random RandNum = Random();
+double getProbability(){ return RandNum()/INT_MAX; }
 
+struct Process {
+public:
+	int ID;
+	int arrivalTime;
+	int totalCPU;
+	int avgBurst;
+
+	//Commands
+	int Start();
+	int Pause();
+	int Resume();
+	int Stop();
+
+	//Queries
+	bool BurstFinished(){
+		if(CPUelapsed == totalCPU) return true;
+		else if(CPUelapsed < (avgBurst - 1))
+			return false;
+		else return evenDistribution(CPUelapsed, totalCPU);
+	}
+
+	Process(int id, int aT, int tC, int aB)
+		: ID(id), arrivalTime(aT), totalCPU(tC), avgBurst(aB), CPUelapsed(0) {}
+
+private: 	
+	int CPUelapsed;
+	int quantRemaining;
+
+	int evenDistribution(int elap, int total){
+		return getProbability() <= (CPUelapsed == (avgBurst - 1)) 
+			? 1/3
+			: 1/2;
+	}
+
+	int tick();
+};
+
+class ProcessQueue{
+private:
+	unordered_map<int, vector<Process*>> inner;
+public:
+	ProcessQueue(){
+		inner = unordered_map<int, vector<Process*>>();
+	}
+
+	void Enqueue(Process* process){
+		int time = process->arrivalTime;
+		if(!inner.count(time))
+			inner[time] = vector<Process*>();
+
+		inner[time].push_back(process);
+	}
+
+	vector<Process*> AtTime(int time){
+		return inner.count(time) ? inner[time] : vector<Process*>();
+	}
+
+	int count(){
+		return inner.size();
+	}
+};
+
+
+//Initialization
 void readOpts(string& ProcessFile, int& IOdelay, int& ContextSwitchDelay, int& CTSSQueues, bool& Debug){
 	ifstream scheduling("scheduling.txt");
 
@@ -76,9 +136,9 @@ void readOpts(string& ProcessFile, int& IOdelay, int& ContextSwitchDelay, int& C
 	}
 }
 
-void readProcesses(string ProcessFile, vector<Process*>& processes){
+void readProcesses(string ProcessFile, ProcessQueue& processes){
 	ifstream processFile(ProcessFile);
-	
+
 	if (processFile.is_open())
 	{
 		string line;
@@ -88,21 +148,53 @@ void readProcesses(string ProcessFile, vector<Process*>& processes){
 			stringstream ss(line);
 			int id, aT, tC, aB;
 			ss >> id >> aT >> tC >> aB;
-			processes.push_back(new Process(id, aT, tC, aB));
+			processes.Enqueue(new Process(id, aT, tC, aB));
 		}
 		processFile.close();
 	}
 }
 
+//Scheduling Algorithms
+class Scheduler{
+public:
+	virtual int tick();
+
+	Scheduler(ProcessQueue& processes) : processes(processes), queueWait(queue<Process*>()) {}
+protected:
+	int time;
+	ProcessQueue processes;
+	queue<Process*> queueWait;
+};
+
+class FCFSScheduler : public Scheduler{
+public:
+	int tick(){
+		vector<Process*> incoming = processes.AtTime(time++);
+		if(incoming.size() > 0)
+			for(int i = 0; i < incoming.size(); i++){
+				queueWait.push(incoming.back());
+				incoming.pop_back();
+			}
+			return 0;
+	}
+};
+
+class CTSScheduler : public Scheduler{
+};
+
 int main(int argc, char* argv[])
 {
+	//Initialization
 	string ProcessFile;
 	int IOdelay, ContextSwitchDelay, CTSSQueues;
 	bool Debug;
-	vector<Process*> processes = vector<Process*>();
+	ProcessQueue processes = ProcessQueue();
 
 	readOpts(ProcessFile, IOdelay, ContextSwitchDelay, CTSSQueues, Debug);
 	readProcesses(ProcessFile, processes);
+
+	//Scheduling
+	//scheduleFCFS(processes);
 
 	return 0;
 }
