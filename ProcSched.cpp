@@ -56,20 +56,34 @@ public:
 		else return evenDistribution(CPUelapsed, totalCPU);
 	}
 
+	int Tick() {
+		quantRemaining--;
+	}
+
+	bool QuantEnded() {
+		return quantRemaining == 0;
+	}
+
+	bool HalfQuantRemaining() {
+		return 2*quantRemaining >= quantTotal;
+	}
+
 	Process(int id, int aT, int tC, int aB)
-		: ID(id), arrivalTime(aT), totalCPU(tC), avgBurst(aB), CPUelapsed(0) {}
+		: ID(id), arrivalTime(aT), totalCPU(tC), avgBurst(aB), CPUelapsed(0), quantTotal(1), quantRemaining(1), CTSSIndex(0) {}
 
 private: 	
 	int CPUelapsed;
+
+	// CTSS-related variables
 	int quantRemaining;
+	int quantTotal;
+	int CTSSIndex;
 
 	int evenDistribution(int elap, int total){
 		return getProbability() <= (CPUelapsed == (avgBurst - 1)) 
 			? 1/3
 			: 1/2;
 	}
-
-	int tick();
 };
 
 class ProcessQueue{
@@ -200,6 +214,35 @@ public:
 };
 
 class CTSScheduler : public Scheduler{
+private:
+	vector<list<Process *> > queues;
+	list<Process *>::iterator it;
+public:
+	int tick(){
+		cout << "====================================================" << endl
+			<< "Tick " << time << endl << "-----------------------" << endl;
+		vector<Process*> incoming = processes.AtTime(time);
+		processes.RemoveTime(time++);
+		cout << "Processes incoming: " << incoming.size() << endl;
+		if(incoming.size() > 0)
+			for(int i = 0; i < incoming.size(); i++){
+				Process* current = incoming.back();
+				cout << "Queued process #" << current->ID << endl;
+				queues[0].push_back(current);
+			}
+		// Look at the highest priority process
+		return 0;
+	}
+
+	bool IsDone(){
+		cout << "Processes yet to arive: " << processes.count() << endl
+			<< "Processes waiting: " << queueWait.size() << endl;
+		return processes.count() == 0;// && queueWait.size() == 0;
+	}
+
+	CTSScheduler(ProcessQueue& processes, int CTSSQueues) : Scheduler(processes) {
+		queues = vector<list<Process *> > (CTSSQueues);
+	}
 };
 
 int main(int argc, char* argv[])
