@@ -398,7 +398,7 @@ public:
 		return processes.Count() == 0;// && queueWait.size() == 0;
 	}
 
-	CTSScheduler(ProcessQueue& processes, int CTSSQueues) : Scheduler(processes), queues(vector<queue<Process*>>()) {}
+	CTSScheduler(ProcessQueue& processes, int CTSSQueues) : Scheduler(processes), queues(vector<queue<Process*> >(CTSSQueues)) {}
 };
 
 int main(int argc, char* argv[])
