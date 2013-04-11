@@ -56,6 +56,7 @@ public:
 	int arrivalTime;
 	int totalCPU;
 	int avgBurst;
+	int CTSSIndex;
 
 	//Queries
 	bool BurstFinished(){
@@ -63,6 +64,10 @@ public:
 		else if(CPUelapsed < (avgBurst - 1))
 			return false;
 		else return evenDistribution(CPUelapsed, totalCPU);
+	}
+
+	bool Finished() {
+		return CPUelapsed == totalCPU;
 	}
 	
 	void Tick(){
@@ -83,6 +88,16 @@ public:
 		return 2*quantRemaining >= quantTotal;
 	}
 
+	void QuantUp() {
+		quantTotal *= 2;
+		quantRemaining = quantTotal;
+	}
+
+	void QuantDown() {
+		quantTotal /= 2;
+		quantRemaining = quantTotal;
+	}
+
 	Process(int id, int aT, int tC, int aB)
 		: ID(id), arrivalTime(aT), totalCPU(tC), avgBurst(aB), CPUelapsed(0), quantTotal(1), quantRemaining(1), CTSSIndex(0) {}
 
@@ -92,7 +107,6 @@ private:
 	// CTSS-related variables
 	int quantRemaining;
 	int quantTotal;
-	int CTSSIndex;
 
 	int evenDistribution(int elap, int total){
 		return getProbability() <= (CPUelapsed == (avgBurst - 1)) 
@@ -300,21 +314,67 @@ private:
 class CTSScheduler : public Scheduler{
 private:
 	vector<queue<Process*>> queues;
-	list<Process *>::iterator it;
+	int delayLeft;
+protected:
+	void runNextReadyProcess() {
+		for (size_t i = 0; i < queues.size(); i++) {
+			if (queues[i].empty)
+				continue;
+			current = queues[i].back;
+			queues[i].pop();
+			state = Running;
+			current->TickCTSS();
+		}
+	}
 public:
-	void Tick(){
+	void scheduleProcess(Process *p) {
+		queues[p->CTSSIndex].push(p);
+	}
+
+	void tick(){
 		cout << "====================================================" << endl
 			<< "Tick " << time << endl << "-----------------------" << endl;
-		vector<Process*> incoming = processes.AtTime(time);
-		processes.RemoveTime(time++);
-		cout << "Processes incoming: " << incoming.size() << endl;
-		if(incoming.size() > 0)
-			for(int i = 0; i < incoming.size(); i++){
-				Process* current = incoming.back();
-				cout << "Queued process #" << current->ID << endl;
-				queues.at(0).push(current);
+
+		getIncoming();
+		checkWaiting();
+
+
+		//Run process
+		switch(state){
+		case Idle:
+			//cout << "Processes ready: " << queueReady.size() << endl;
+			runNextReadyProcess();
+			break;
+		case ContextSwitch:
+			cout << "Context switch delay... " << delayLeft-- << " ticks" << endl;
+			if(delayLeft == 0) state = Idle;
+			break;	
+		case Running:
+			cout << "Running proccess #" << current->ID << endl;
+			if (current->QuantEnded && !current->BurstFinished) {
+				if (current->CTSSIndex < queues.size() - 1) {
+					current->CTSSIndex++;
+					queues[current->CTSSIndex].push(current);
+					current->QuantUp();
+				} else {
+					queues[current->CTSSIndex].push(current);
+				}
+			} else if (current->BurstFinished && current->HalfQuantRemaining) {
+				if (current->CTSSIndex > 0) {
+					current->CTSSIndex--;
+					current->QuantDown();
+				}
+			} 
+			if(current->BurstFinished()){
+				cout << "Burst finished, process waiting" << endl;
+				queueWait.push(WaitingProcess(current, time+SchedulerOptions.IOdelay));
+
+				state = ContextSwitch;
+				delayLeft = SchedulerOptions.ContextSwitchDelay;
 			}
-		// Look at the highest priority process
+			else current->TickCTSS();
+			break;
+		}
 		return;
 	}
 
