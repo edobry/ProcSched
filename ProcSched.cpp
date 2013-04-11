@@ -98,6 +98,10 @@ public:
 		quantRemaining = quantTotal;
 	}
 
+	void QuantReset() {
+		quantRemaining = quantTotal;
+	}
+
 	Process(int id, int aT, int tC, int aB)
 		: ID(id), arrivalTime(aT), totalCPU(tC), avgBurst(aB), CPUelapsed(0), quantTotal(1), quantRemaining(1), CTSSIndex(0) {}
 
@@ -350,6 +354,14 @@ public:
 			if(delayLeft == 0) state = Idle;
 			break;	
 		case Running:
+			for (size_t i = 0; i < current->CTSSIndex; i++) {
+				if (!queues[i].empty) {
+					queues[current->CTSSIndex].push(current);
+					state = ContextSwitch;
+					delayLeft = SchedulerOptions.ContextSwitchDelay;
+					break;
+				}
+			}
 			cout << "Running proccess #" << current->ID << endl;
 			if (current->QuantEnded && !current->BurstFinished) {
 				if (current->CTSSIndex < queues.size() - 1) {
@@ -358,6 +370,7 @@ public:
 					current->QuantUp();
 				} else {
 					queues[current->CTSSIndex].push(current);
+					current->QuantReset();
 				}
 			} else if (current->BurstFinished && current->HalfQuantRemaining) {
 				if (current->CTSSIndex > 0) {
@@ -367,6 +380,7 @@ public:
 			} 
 			if(current->BurstFinished()){
 				cout << "Burst finished, process waiting" << endl;
+				current->QuantReset();
 				queueWait.push(WaitingProcess(current, time+SchedulerOptions.IOdelay));
 
 				state = ContextSwitch;
